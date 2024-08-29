@@ -1,4 +1,4 @@
-package main
+package litejsondb
 
 import (
 	"crypto/sha256"
