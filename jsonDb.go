@@ -143,17 +143,21 @@ func (db *JsonDB) IsUnique(category, field, value string) bool {
 	return true
 }
 
-// SetDataWithAutoIncrement ajoute une entrée avec un ID auto-incrémenté
 func (db *JsonDB) SetDataWithAutoIncrement(category string, value map[string]interface{}) (int, error) {
 	// Vérifier l'unicité pour tous les champs soumis à une contrainte unique
-	for field := range value {
-		if !db.IsUnique(category, field, value[field].(string)) {
-			return 0, fmt.Errorf("%s %s already exists", field, value[field].(string))
+	for field, val := range value {
+		// Convertir la valeur en chaîne de caractères pour la comparaison
+		valStr, ok := val.(string)
+		if !ok {
+			return 0, fmt.Errorf("expected string for field %s, but got %T", field, val)
+		}
+		if !db.IsUnique(category, field, valStr) {
+			return 0, fmt.Errorf("%s %s already exists", field, valStr)
 		}
 	}
 
 	nextID := db.GetNextID(category)
-	key := fmt.Sprintf("%s_%d", category, nextID)
+	key := fmt.Sprintf("%s/%d", category, nextID)
 	db.SetData(key, value)
 	return nextID, nil
 }
@@ -228,4 +232,3 @@ func HashPassword(password string) string {
 func CheckPassword(storedHash, password string) bool {
 	return storedHash == HashPassword(password)
 }
-
