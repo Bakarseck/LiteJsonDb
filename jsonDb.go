@@ -4,9 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const DATABASE_DIR = "database"
@@ -35,13 +37,57 @@ func (db *JsonDB) initDB() {
 	}
 
 	if _, err := os.Stat(db.FilePath); os.IsNotExist(err) {
-		err := os.WriteFile(db.FilePath, []byte("{}"), 0644)
+		// Initialiser auto_increment correctement
+		initialData := map[string]interface{}{
+			"auto_increment": make(map[string]interface{}),
+		}
+		fileData, _ := json.MarshalIndent(initialData, "", "  ")
+		err := os.WriteFile(db.FilePath, fileData, 0644)
 		if err != nil {
 			log.Fatalf("Oops! Unable to create the database file. Error details: %v", err)
 		}
 	} else {
 		db.loadDB()
 	}
+}
+
+// GetNextID retourne l'ID suivant pour une catégorie donnée et l'incrémente
+func (db *JsonDB) GetNextID(category string) int {
+	autoIncrement, ok := db.DB["auto_increment"].(map[string]interface{})
+	if !ok || autoIncrement == nil {
+		// Si auto_increment n'existe pas ou est nil, l'initialiser correctement
+		autoIncrement = make(map[string]interface{})
+		db.DB["auto_increment"] = autoIncrement
+	}
+
+	if _, exists := autoIncrement[category]; !exists {
+		autoIncrement[category] = 1
+		db.saveDB()
+		return 1
+	}
+	nextID := int(autoIncrement[category].(float64)) + 1
+	autoIncrement[category] = nextID
+	db.saveDB()
+	return nextID
+}
+
+// SetDataWithAutoIncrement ajoute une entrée avec un ID auto-incrémenté
+func (db *JsonDB) SetDataWithAutoIncrement(category string, value interface{}) int {
+	nextID := db.GetNextID(category)
+
+	// Vérifier si la catégorie existe déjà dans la base de données
+	if _, exists := db.DB[category]; !exists {
+		db.DB[category] = make(map[string]interface{}) // Créer un nouveau map pour cette catégorie
+	}
+
+	// Ajouter les données sous la clé de catégorie avec le sous-ID
+	categoryMap := db.DB[category].(map[string]interface{})
+	categoryMap[fmt.Sprintf("%d", nextID)] = value
+
+	// Sauvegarder les modifications
+	db.saveDB()
+
+	return nextID
 }
 
 func (db *JsonDB) loadDB() {
@@ -74,19 +120,35 @@ func (db *JsonDB) SetData(key string, value interface{}) {
 }
 
 func (db *JsonDB) GetData(key string) interface{} {
-	if value, exists := db.DB[key]; exists {
-		return value
+	// Extraire la catégorie et l'ID
+	category := key[:strings.Index(key, "/")]
+	id := key[strings.Index(key, "/")+1:]
+
+	// Vérifier si la catégorie et l'ID existent
+	if categoryMap, exists := db.DB[category].(map[string]interface{}); exists {
+		if value, exists := categoryMap[id]; exists {
+			return value
+		}
 	}
 	log.Printf("Oops! The key '%s' does not exist.", key)
 	return nil
 }
 
 func (db *JsonDB) DeleteData(key string) {
-	if _, exists := db.DB[key]; exists {
-		delete(db.DB, key)
-		db.saveDB()
+	// Extraire la catégorie et l'ID
+	category := key[:strings.Index(key, "/")]
+	id := key[strings.Index(key, "/")+1:]
+
+	// Vérifier si la catégorie et l'ID existent
+	if categoryMap, exists := db.DB[category].(map[string]interface{}); exists {
+		if _, exists := categoryMap[id]; exists {
+			delete(categoryMap, id)
+			db.saveDB()
+		} else {
+			log.Printf("Oops! The ID '%s' does not exist in category '%s'.", id, category)
+		}
 	} else {
-		log.Printf("Oops! The key '%s' does not exist.", key)
+		log.Printf("Oops! The category '%s' does not exist.", category)
 	}
 }
 
