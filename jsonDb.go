@@ -71,23 +71,91 @@ func (db *JsonDB) GetNextID(category string) int {
 	return nextID
 }
 
-// SetDataWithAutoIncrement ajoute une entrée avec un ID auto-incrémenté
-func (db *JsonDB) SetDataWithAutoIncrement(category string, value interface{}) int {
-	nextID := db.GetNextID(category)
-
-	// Vérifier si la catégorie existe déjà dans la base de données
-	if _, exists := db.DB[category]; !exists {
-		db.DB[category] = make(map[string]interface{}) // Créer un nouveau map pour cette catégorie
+// Ajoute une contrainte dans la base de données
+func (db *JsonDB) SetConstraint(category, constraintType, field string) {
+	constraints, ok := db.DB["constraints"].(map[string]interface{})
+	if !ok {
+		constraints = make(map[string]interface{})
+		db.DB["constraints"] = constraints
 	}
 
-	// Ajouter les données sous la clé de catégorie avec le sous-ID
-	categoryMap := db.DB[category].(map[string]interface{})
-	categoryMap[fmt.Sprintf("%d", nextID)] = value
+	categoryConstraints, ok := constraints[category].(map[string]interface{})
+	if !ok {
+		categoryConstraints = make(map[string]interface{})
+		constraints[category] = categoryConstraints
+	}
 
-	// Sauvegarder les modifications
+	fields, ok := categoryConstraints[constraintType].([]interface{})
+	if !ok {
+		fields = []interface{}{}
+	}
+
+	// Ajouter le champ s'il n'est pas déjà présent
+	for _, f := range fields {
+		if f == field {
+			return // Le champ est déjà présent pour cette contrainte
+		}
+	}
+
+	categoryConstraints[constraintType] = append(fields, field)
 	db.saveDB()
+}
 
-	return nextID
+// Vérifie si un champ est soumis à une contrainte spécifique pour une catégorie
+func (db *JsonDB) IsFieldConstrained(category, constraintType, field string) bool {
+	constraints, ok := db.DB["constraints"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+
+	categoryConstraints, ok := constraints[category].(map[string]interface{})
+	if !ok {
+		return false
+	}
+
+	fields, ok := categoryConstraints[constraintType].([]interface{})
+	if !ok {
+		return false
+	}
+
+	for _, f := range fields {
+		if f == field {
+			return true
+		}
+	}
+	return false
+}
+
+// Vérifie si une valeur est unique pour un champ soumis à une contrainte unique
+func (db *JsonDB) IsUnique(category, field, value string) bool {
+	if !db.IsFieldConstrained(category, "unique", field) {
+		return true // Si le champ n'est pas contraint à l'unicité, on ne vérifie pas
+	}
+
+	for key, record := range db.DB {
+		if key[:len(category)] == category {
+			recordMap, ok := record.(map[string]interface{})
+			if ok && recordMap[field] == value {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// SetDataWithAutoIncrement ajoute une entrée avec un ID auto-incrémenté
+func (db *JsonDB) SetDataWithAutoIncrement(category string, value map[string]interface{}) (int, error) {
+	// Vérifier l'unicité pour tous les champs soumis à une contrainte unique
+	for field := range value {
+		if !db.IsUnique(category, field, value[field].(string)) {
+			return 0, fmt.Errorf("%s %s already exists", field, value[field].(string))
+		}
+	}
+
+	nextID := db.GetNextID(category)
+	key := fmt.Sprintf("%s_%d", category, nextID)
+	db.SetData(key, value)
+	return nextID, nil
 }
 
 func (db *JsonDB) loadDB() {
@@ -159,4 +227,32 @@ func HashPassword(password string) string {
 
 func CheckPassword(storedHash, password string) bool {
 	return storedHash == HashPassword(password)
+}
+
+func main() {
+	db := NewJsonDB(DB_FILE)
+
+	// Définir le champ "username" comme unique pour la catégorie "user"
+	db.SetConstraint("user", "unique", "username")
+
+	// Ajouter une entrée dans la catégorie "user" avec auto-incrément
+	userData := map[string]interface{}{
+		"username": "Alice",
+		"password": HashPassword("password123"),
+	}
+
+	userID, err := db.SetDataWithAutoIncrement("user", userData)
+	if err != nil {
+		fmt.Printf("Error adding user: %v\n", err)
+	} else {
+		fmt.Printf("User added with ID: %d\n", userID)
+	}
+
+	// Tenter d'ajouter le même utilisateur
+	userID, err = db.SetDataWithAutoIncrement("user", userData)
+	if err != nil {
+		fmt.Printf("Error adding user: %v\n", err)
+	} else {
+		fmt.Printf("User added with ID: %d\n", userID)
+	}
 }
