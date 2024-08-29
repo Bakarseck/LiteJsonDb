@@ -229,30 +229,3 @@ func CheckPassword(storedHash, password string) bool {
 	return storedHash == HashPassword(password)
 }
 
-func main() {
-	db := NewJsonDB(DB_FILE)
-
-	// Définir le champ "username" comme unique pour la catégorie "user"
-	db.SetConstraint("user", "unique", "username")
-
-	// Ajouter une entrée dans la catégorie "user" avec auto-incrément
-	userData := map[string]interface{}{
-		"username": "Alice",
-		"password": HashPassword("password123"),
-	}
-
-	userID, err := db.SetDataWithAutoIncrement("user", userData)
-	if err != nil {
-		fmt.Printf("Error adding user: %v\n", err)
-	} else {
-		fmt.Printf("User added with ID: %d\n", userID)
-	}
-
-	// Tenter d'ajouter le même utilisateur
-	userID, err = db.SetDataWithAutoIncrement("user", userData)
-	if err != nil {
-		fmt.Printf("Error adding user: %v\n", err)
-	} else {
-		fmt.Printf("User added with ID: %d\n", userID)
-	}
-}
